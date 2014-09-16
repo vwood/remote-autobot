@@ -1,7 +1,10 @@
+#!/usr/bin/env python
+
 import autopy
 import zmq
 import time
 import zlib
+import base64
 
 # screen = autopy.bitmap.capture_screen() # rect = None
 
@@ -50,34 +53,58 @@ import zlib
 
 port = 18080
 
+def send(socket, command):
+    done = False
+    while not done:
+        try:
+            socket.send_json(command, zmq.NOBLOCK)
+            done = True
+        except zmq.ZMQError, e:
+            if e.errno != zmq.EAGAIN:
+                raise
+        time.sleep(0.1)                
+
+def get_response(socket):
+    while True:
+        try:
+            return socket.recv_json(zmq.NOBLOCK)
+        except zmq.ZMQError, e:
+            if e.errno != zmq.EAGAIN:
+                raise
+        time.sleep(0.1)
+
+        
 context = zmq.Context.instance()
 sock = context.socket(zmq.REP)
 sock.bind('tcp://*:%s' % (port,))
 
-done = False
-while not done:
-    try:
-        message = sock.recv_json(zmq.NOBLOCK)
-        command = message['cmd']
-        args = message["args"]
-        if command == 'capture':
-            if len(args) == 4:
-                x, y, w, h = [int(arg) for arg in args]
-                result = autopy.bitmap.capture_screen(((x, y), (w, h)))
-            else:
-                result = autopy.bitmap.capture_screen()
-            result = result.to_string()
-            result = zlib.compress(result)
-        elif command == 'mouse':
-                    
+while True:
+    message = get_response(sock)
+    command = message['cmd']
+    args = message["args"]
+    if command == 'capture':
+        if len(args) == 4:
+            x, y, w, h = [int(arg) for arg in args]
+            print "capturing region (%d, %d) (%d, %d)" % (x, y, w, h)
+            result = autopy.bitmap.capture_screen(((x, y), (w, h)))
+        else:
+            print "capturing whole screen"
+            result = autopy.bitmap.capture_screen()
+        result = result.to_string()
+        result = base64.b64encode(zlib.compress(result))
+    elif command == 'mouse':
+        if len(args) == 2:
+            x, y = [int(arg) for arg in args]
+            autopy.mouse.move(x,y)
+            result = "Success"
+        else:
+            result = "Error, incorrect args"
+    elif command == 'echo':
+        print "ECHO: ", ' '.join(args)
+        result = "Success"
+    else:
+        result = "Unrecognised command"
+    result = { 'cmd': command, 'result' : result }
 
-        result = { 'result' : result }
-            
-        region = autopy.bitmap.capture_screen(((100, 100), (40, 40)))
-        print command, "MSG:", message
-        print region.to_string()
-        response = {'cmd': command, 'screen': region.to_string()}
-        sock.send_json(response)
-    except zmq.ZMQError, e:
-        pass
-    time.sleep(0.1)
+    send(sock, result)
+
