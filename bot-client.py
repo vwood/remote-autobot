@@ -8,6 +8,8 @@ import zlib
 
 port = 18080
 
+# TODO: auth, using auth object
+
 def send(socket, command):
     done = False
     while not done:
@@ -27,7 +29,6 @@ def get_response(socket):
             if e.errno != zmq.EAGAIN:
                 raise
         time.sleep(0.1)
-
                 
 context = zmq.Context.instance()
 socket = context.socket(zmq.REQ)
@@ -53,22 +54,30 @@ def command_loop(socket):
             print "Valid commands:"
             print "  help              - display this help"
             print "  capture [x y w h] - capture a region (or entire screen)"
+            print "  mouse x y         - move mouse"
+            print "  drag x1 y1 [x2 y2]- drag mouse to x1 y1, or from x1 y1 to x2 y2"
+            print "  info              - basic screen info"
             print
         elif command == 'capture':
             send(socket, {"cmd":command, "args":args})
             response = get_response(socket)
-            if response.has_key('result'):
-                capture = response['result']
+            if response.has_key('capture'):
+                capture = response['capture']
                 capture = autopy.bitmap.Bitmap.from_string(
                     zlib.decompress(base64.b64decode(capture)))
                 capture.save("capture.png", "PNG")
                 print "saved capture"
             else:
                 print "Result missing from capture."
-        else:
-            # TODO: expect responses
-            # TODO: check error conditions
+        elif command == 'info':
             send(socket, {"cmd":command, "args":args})
-            print get_response(socket)
+            response = get_response(socket)
+            print "INFO:", response["info"]
+        else:
+            # Will work for commands that don't require anything more for response
+            send(socket, {"cmd":command, "args":args})
+            response = get_response(socket)
+            if response.has_key("error"):
+                print "ERROR:", response["error"]
 
 command_loop(socket)
